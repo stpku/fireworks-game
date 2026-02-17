@@ -1,0 +1,1092 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="theme-color" content="#0a0a0a">
+    <title>手势控制烟火秀</title>
+    <link rel="manifest" href="manifest.json">
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils/control_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            -webkit-touch-callout: none;
+            -webkit-user-select: none;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        html, body {
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            position: fixed;
+            touch-action: none;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Microsoft YaHei', sans-serif;
+            background: linear-gradient(135deg, #0a0a0a 0%, #1a1a2e 50%, #16213e 100%);
+        }
+
+        #gameContainer {
+            position: relative;
+            width: 100%;
+            height: 100%;
+        }
+
+        #fireworksCanvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 1;
+            touch-action: none;
+        }
+
+        #cameraPreview {
+            position: absolute;
+            bottom: 10px;
+            right: 10px;
+            width: 120px;
+            height: 90px;
+            border-radius: 8px;
+            border: 2px solid rgba(255, 255, 255, 0.3);
+            z-index: 10;
+            background: rgba(0, 0, 0, 0.5);
+            overflow: hidden;
+        }
+
+        @media (min-width: 768px) {
+            #cameraPreview {
+                width: 200px;
+                height: 150px;
+                bottom: 20px;
+                right: 20px;
+                border-width: 3px;
+                border-radius: 12px;
+            }
+        }
+
+        #videoElement {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            transform: scaleX(-1);
+        }
+
+        #handCanvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            transform: scaleX(-1);
+            pointer-events: none;
+        }
+
+        #startScreen {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            background: rgba(0, 0, 0, 0.9);
+            z-index: 100;
+            pointer-events: auto;
+            padding: 20px;
+            overflow-y: auto;
+        }
+
+        #startScreen h1 {
+            font-size: 2rem;
+            color: #fff;
+            text-shadow: 0 0 10px #ff6b6b, 0 0 20px #ff6b6b;
+            margin-bottom: 15px;
+            animation: glow 2s ease-in-out infinite alternate;
+            text-align: center;
+        }
+
+        @media (min-width: 768px) {
+            #startScreen h1 {
+                font-size: 3.5rem;
+                margin-bottom: 20px;
+            }
+        }
+
+        @keyframes glow {
+            from { text-shadow: 0 0 10px #ff6b6b, 0 0 20px #ff6b6b; }
+            to { text-shadow: 0 0 15px #ffd93d, 0 0 30px #ffd93d; }
+        }
+
+        .instructions {
+            color: #fff;
+            font-size: 0.9rem;
+            text-align: center;
+            margin: 10px 0;
+            line-height: 1.6;
+            max-width: 500px;
+        }
+
+        @media (min-width: 768px) {
+            .instructions {
+                font-size: 1.1rem;
+                margin: 15px 0;
+                line-height: 1.8;
+            }
+        }
+
+        .instructions p {
+            margin: 8px 0;
+        }
+
+        .highlight {
+            color: #ffd93d;
+            font-weight: bold;
+        }
+
+        .control-options {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            margin: 15px 0;
+            width: 100%;
+            max-width: 300px;
+        }
+
+        @media (min-width: 768px) {
+            .control-options {
+                flex-direction: row;
+                max-width: 600px;
+                gap: 20px;
+            }
+        }
+
+        .control-btn {
+            padding: 15px 25px;
+            font-size: 1rem;
+            background: linear-gradient(45deg, #667eea 0%, #764ba2 100%);
+            border: none;
+            border-radius: 25px;
+            color: #fff;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+            box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4);
+        }
+
+        .control-btn.primary {
+            background: linear-gradient(45deg, #ff6b6b, #ffd93d);
+            box-shadow: 0 4px 15px rgba(255, 107, 107, 0.4);
+        }
+
+        .control-btn:hover, .control-btn:active {
+            transform: scale(0.98);
+            box-shadow: 0 2px 10px rgba(102, 126, 234, 0.3);
+        }
+
+        .control-btn.primary:hover, .control-btn.primary:active {
+            box-shadow: 0 2px 10px rgba(255, 107, 107, 0.3);
+        }
+
+        @media (min-width: 768px) {
+            .control-btn {
+                padding: 18px 40px;
+                font-size: 1.2rem;
+            }
+        }
+
+        .control-icon {
+            font-size: 1.5rem;
+        }
+
+        #handIndicator {
+            position: absolute;
+            width: 50px;
+            height: 50px;
+            border: 3px solid #ffd93d;
+            border-radius: 50%;
+            transform: translate(-50%, -50%);
+            pointer-events: none;
+            z-index: 20;
+            display: none;
+            box-shadow: 0 0 15px #ffd93d, inset 0 0 15px rgba(255, 217, 61, 0.3);
+        }
+
+        @media (min-width: 768px) {
+            #handIndicator {
+                width: 60px;
+                height: 60px;
+                border-width: 4px;
+            }
+        }
+
+        #handIndicator.active {
+            display: block;
+            animation: pulse 0.5s ease-in-out infinite alternate;
+        }
+
+        @keyframes pulse {
+            from { transform: translate(-50%, -50%) scale(1); }
+            to { transform: translate(-50%, -50%) scale(1.2); }
+        }
+
+        #handIndicator::after {
+            content: '';
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            width: 8px;
+            height: 8px;
+            background: #ffd93d;
+            border-radius: 50%;
+            transform: translate(-50%, -50%);
+        }
+
+        #stats {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            color: #fff;
+            font-size: 0.8rem;
+            z-index: 10;
+            background: rgba(0, 0, 0, 0.5);
+            padding: 10px 12px;
+            border-radius: 8px;
+            backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px);
+        }
+
+        @media (min-width: 768px) {
+            #stats {
+                top: 20px;
+                left: 20px;
+                font-size: 0.95rem;
+                padding: 12px 18px;
+                border-radius: 10px;
+            }
+        }
+
+        #stats div {
+            margin: 3px 0;
+        }
+
+        .status-dot {
+            display: inline-block;
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            margin-right: 6px;
+        }
+
+        @media (min-width: 768px) {
+            .status-dot {
+                width: 10px;
+                height: 10px;
+                margin-right: 8px;
+            }
+        }
+
+        .status-dot.active {
+            background: #4ade80;
+            box-shadow: 0 0 8px #4ade80;
+        }
+
+        .status-dot.inactive {
+            background: #ef4444;
+        }
+
+        #loading {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: #fff;
+            font-size: 1rem;
+            z-index: 50;
+            display: none;
+            text-align: center;
+        }
+
+        .spinner {
+            width: 40px;
+            height: 40px;
+            border: 4px solid rgba(255, 255, 255, 0.3);
+            border-top-color: #ffd93d;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 15px;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .gesture-hint {
+            position: absolute;
+            bottom: 10px;
+            left: 10px;
+            right: 140px;
+            color: #fff;
+            font-size: 0.75rem;
+            z-index: 10;
+            background: rgba(0, 0, 0, 0.6);
+            padding: 8px 12px;
+            border-radius: 8px;
+            backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px);
+            line-height: 1.4;
+        }
+
+        @media (min-width: 768px) {
+            .gesture-hint {
+                bottom: 20px;
+                left: 20px;
+                right: 240px;
+                font-size: 0.9rem;
+                padding: 12px 18px;
+            }
+        }
+
+        #touchControls {
+            position: absolute;
+            bottom: 110px;
+            left: 10px;
+            right: 10px;
+            display: none;
+            z-index: 15;
+            pointer-events: none;
+        }
+
+        @media (min-width: 768px) {
+            #touchControls {
+                bottom: 180px;
+                left: 20px;
+                right: 20px;
+            }
+        }
+
+        .touch-btn {
+            pointer-events: auto;
+            width: 70px;
+            height: 70px;
+            border-radius: 50%;
+            border: 2px solid rgba(255, 255, 255, 0.5);
+            background: rgba(255, 255, 255, 0.2);
+            color: #fff;
+            font-size: 1.8rem;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px);
+            transition: all 0.1s;
+        }
+
+        .touch-btn:active {
+            background: rgba(255, 255, 255, 0.4);
+            transform: scale(0.95);
+        }
+
+        .touch-btn.fire-btn {
+            position: absolute;
+            right: 0;
+            bottom: 0;
+            width: 80px;
+            height: 80px;
+            background: linear-gradient(135deg, rgba(255, 107, 107, 0.8), rgba(255, 217, 61, 0.8));
+            border-color: rgba(255, 255, 255, 0.8);
+            font-size: 2rem;
+        }
+
+        @media (min-width: 768px) {
+            .touch-btn {
+                width: 80px;
+                height: 80px;
+            }
+            .touch-btn.fire-btn {
+                width: 100px;
+                height: 100px;
+            }
+        }
+
+        .orientation-warning {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.95);
+            z-index: 200;
+            display: none;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            color: #fff;
+            text-align: center;
+            padding: 20px;
+        }
+
+        .orientation-warning.show {
+            display: flex;
+        }
+
+        .orientation-icon {
+            font-size: 4rem;
+            margin-bottom: 20px;
+            animation: rotate 2s ease-in-out infinite;
+        }
+
+        @keyframes rotate {
+            0%, 100% { transform: rotate(0deg); }
+            50% { transform: rotate(90deg); }
+        }
+
+        .mode-indicator {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            padding: 6px 12px;
+            background: rgba(0, 0, 0, 0.6);
+            color: #fff;
+            font-size: 0.75rem;
+            border-radius: 15px;
+            z-index: 10;
+            backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px);
+        }
+
+        @media (min-width: 768px) {
+            .mode-indicator {
+                top: 20px;
+                right: 20px;
+                font-size: 0.85rem;
+                padding: 8px 16px;
+            }
+        }
+
+        .switch-mode-btn {
+            position: absolute;
+            bottom: 10px;
+            left: 50%;
+            transform: translateX(-50%);
+            padding: 8px 16px;
+            background: rgba(255, 255, 255, 0.2);
+            border: 1px solid rgba(255, 255, 255, 0.3);
+            color: #fff;
+            font-size: 0.75rem;
+            border-radius: 20px;
+            cursor: pointer;
+            z-index: 20;
+            backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px);
+        }
+
+        @media (min-width: 768px) {
+            .switch-mode-btn {
+                bottom: 20px;
+                padding: 10px 20px;
+                font-size: 0.85rem;
+            }
+        }
+
+        .hidden { display: none !important; }
+    </style>
+</head>
+<body>
+    <div id="gameContainer">
+        <canvas id="fireworksCanvas"></canvas>
+        
+        <div id="cameraPreview">
+            <video id="videoElement" playsinline></video>
+            <canvas id="handCanvas"></canvas>
+        </div>
+
+        <div id="handIndicator"></div>
+
+        <div id="stats">
+            <div><span class="status-dot inactive" id="cameraStatus"></span>摄像头</div>
+            <div><span class="status-dot inactive" id="handStatus"></span>手势识别</div>
+            <div>发射次数: <span id="fireCount">0</span></div>
+        </div>
+
+        <div class="mode-indicator" id="modeIndicator">触摸模式</div>
+
+        <div class="gesture-hint" id="gestureHint" style="display: none;">
+            ✋ 移动手掌控制发射位置，捏合手指发射
+        </div>
+
+        <div id="touchControls">
+            <button class="touch-btn fire-btn" id="fireBtn">🎆</button>
+        </div>
+
+        <button class="switch-mode-btn" id="switchModeBtn" style="display: none;">切换到手势模式</button>
+
+        <div id="loading">
+            <div class="spinner"></div>
+            <div id="loadingText">正在启动...</div>
+        </div>
+
+        <div class="orientation-warning" id="orientationWarning">
+            <div class="orientation-icon">📱</div>
+            <h2>请旋转设备</h2>
+            <p>为获得最佳体验，请使用横屏模式</p>
+        </div>
+
+        <div id="startScreen">
+            <h1>🎆 手势烟火秀 🎆</h1>
+            <div class="instructions">
+                <p>体验神奇的虚拟烟火表演！</p>
+                <p>选择您喜欢的控制方式：</p>
+            </div>
+            <div class="control-options">
+                <button class="control-btn primary" id="gestureBtn">
+                    <span class="control-icon">✋</span>
+                    <span>手势控制</span>
+                </button>
+                <button class="control-btn" id="touchBtn">
+                    <span class="control-icon">👆</span>
+                    <span>触摸控制</span>
+                </button>
+            </div>
+            <div class="instructions" style="margin-top: 15px; font-size: 0.8rem; opacity: 0.8;">
+                <p><span class="highlight">手势模式：</span>通过摄像头识别手势</p>
+                <p><span class="highlight">触摸模式：</span>直接点击屏幕发射</p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // ==================== 设备检测 ====================
+        const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+        const isAndroid = /Android/i.test(navigator.userAgent);
+        
+        // ==================== 游戏状态 ====================
+        const gameState = {
+            isPlaying: false,
+            handDetected: false,
+            handX: 0.5,
+            handY: 0.5,
+            fireCount: 0,
+            lastFireTime: 0,
+            autoFire: false,
+            controlMode: 'touch',
+            isTouching: false,
+            touchX: 0,
+            touchY: 0
+        };
+
+        // ==================== Canvas 设置 ====================
+        const canvas = document.getElementById('fireworksCanvas');
+        const ctx = canvas.getContext('2d');
+        let width, height;
+
+        function resizeCanvas() {
+            width = canvas.width = window.innerWidth;
+            height = canvas.height = window.innerHeight;
+        }
+        resizeCanvas();
+        window.addEventListener('resize', resizeCanvas);
+
+        // 防止移动端橡皮筋效果
+        document.addEventListener('touchmove', (e) => {
+            if (e.target === canvas) {
+                e.preventDefault();
+            }
+        }, { passive: false });
+
+        // ==================== 烟火粒子系统 ====================
+        class Particle {
+            constructor(x, y, color, velocity, decay, size) {
+                this.x = x;
+                this.y = y;
+                this.color = color;
+                this.vx = velocity.x;
+                this.vy = velocity.y;
+                this.decay = decay;
+                this.size = size;
+                this.alpha = 1;
+                this.trail = [];
+                this.maxTrailLength = isMobile ? 3 : 5;
+            }
+
+            update() {
+                this.trail.push({ x: this.x, y: this.y });
+                if (this.trail.length > this.maxTrailLength) {
+                    this.trail.shift();
+                }
+
+                this.x += this.vx;
+                this.y += this.vy;
+                this.vy += 0.15;
+                this.vx *= 0.98;
+                this.vy *= 0.98;
+                this.alpha -= this.decay;
+                this.size *= 0.98;
+            }
+
+            draw(ctx) {
+                ctx.save();
+                
+                if (!isMobile && this.trail.length > 1) {
+                    ctx.beginPath();
+                    ctx.moveTo(this.trail[0].x, this.trail[0].y);
+                    for (let i = 1; i < this.trail.length; i++) {
+                        ctx.lineTo(this.trail[i].x, this.trail[i].y);
+                    }
+                    ctx.strokeStyle = this.color;
+                    ctx.lineWidth = this.size * 0.5;
+                    ctx.globalAlpha = this.alpha * 0.5;
+                    ctx.stroke();
+                }
+
+                ctx.globalAlpha = this.alpha;
+                ctx.fillStyle = this.color;
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+                ctx.fill();
+
+                if (!isMobile) {
+                    ctx.shadowBlur = 10;
+                    ctx.shadowColor = this.color;
+                    ctx.beginPath();
+                    ctx.arc(this.x, this.y, this.size * 0.5, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+
+                ctx.restore();
+            }
+        }
+
+        class Firework {
+            constructor(targetX, targetY, color) {
+                this.x = targetX;
+                this.y = height;
+                this.targetY = targetY;
+                this.color = color;
+                this.vx = (targetX - this.x) * 0.02;
+                this.vy = -Math.sqrt(2 * 0.3 * (height - targetY));
+                this.exploded = false;
+                this.particles = [];
+                this.trail = [];
+            }
+
+            update() {
+                if (!this.exploded) {
+                    this.trail.push({ x: this.x, y: this.y });
+                    if (this.trail.length > 10) this.trail.shift();
+
+                    this.x += this.vx;
+                    this.y += this.vy;
+                    this.vy += 0.3;
+
+                    if (this.vy >= 0 || this.y <= this.targetY) {
+                        this.explode();
+                    }
+                } else {
+                    this.particles = this.particles.filter(p => {
+                        p.update();
+                        return p.alpha > 0;
+                    });
+                }
+            }
+
+            explode() {
+                this.exploded = true;
+                const particleCount = isMobile ? 50 : 80 + Math.random() * 40;
+                const patterns = isMobile ? ['sphere', 'ring'] : ['sphere', 'ring', 'heart', 'star'];
+                const pattern = patterns[Math.floor(Math.random() * patterns.length)];
+
+                for (let i = 0; i < particleCount; i++) {
+                    let angle, speed;
+                    
+                    switch(pattern) {
+                        case 'ring':
+                            angle = (Math.PI * 2 * i) / particleCount;
+                            speed = 4 + Math.random() * 2;
+                            break;
+                        default:
+                            angle = Math.random() * Math.PI * 2;
+                            speed = Math.random() * 6 + 2;
+                    }
+
+                    const velocity = {
+                        x: Math.cos(angle) * speed,
+                        y: Math.sin(angle) * speed
+                    };
+
+                    const hue = parseInt(this.color.match(/\d+/)[0]) + (Math.random() - 0.5) * 60;
+                    const color = `hsl(${hue}, 100%, 60%)`;
+
+                    this.particles.push(new Particle(
+                        this.x, this.y, color, velocity, 0.015 + Math.random() * 0.01, 3 + Math.random() * 2
+                    ));
+                }
+
+                if (!isMobile) {
+                    setTimeout(() => {
+                        for (let i = 0; i < 20; i++) {
+                            const angle = Math.random() * Math.PI * 2;
+                            const speed = Math.random() * 3 + 1;
+                            const velocity = { x: Math.cos(angle) * speed, y: Math.sin(angle) * speed };
+                            const hue = parseInt(this.color.match(/\d+/)[0]) + 180;
+                            const color = `hsl(${hue}, 100%, 70%)`;
+                            this.particles.push(new Particle(this.x, this.y, color, velocity, 0.02, 2));
+                        }
+                    }, 300);
+                }
+            }
+
+            draw(ctx) {
+                if (!this.exploded) {
+                    ctx.save();
+                    ctx.beginPath();
+                    for (let i = 0; i < this.trail.length - 1; i++) {
+                        ctx.moveTo(this.trail[i].x, this.trail[i].y);
+                        ctx.lineTo(this.trail[i+1].x, this.trail[i+1].y);
+                    }
+                    ctx.strokeStyle = this.color;
+                    ctx.lineWidth = 3;
+                    ctx.lineCap = 'round';
+                    ctx.stroke();
+                    ctx.restore();
+
+                    ctx.save();
+                    ctx.fillStyle = this.color;
+                    ctx.shadowBlur = 15;
+                    ctx.shadowColor = this.color;
+                    ctx.beginPath();
+                    ctx.arc(this.x, this.y, 4, 0, Math.PI * 2);
+                    ctx.fill();
+                    ctx.restore();
+                } else {
+                    this.particles.forEach(p => p.draw(ctx));
+                }
+            }
+
+            isDead() {
+                return this.exploded && this.particles.length === 0;
+            }
+        }
+
+        let fireworks = [];
+
+        // ==================== 烟火发射控制 ====================
+        function launchFirework(x, y) {
+            const colors = [
+                'hsl(0, 100%, 60%)',
+                'hsl(60, 100%, 60%)',
+                'hsl(120, 100%, 60%)',
+                'hsl(180, 100%, 60%)',
+                'hsl(240, 100%, 60%)',
+                'hsl(300, 100%, 60%)',
+                'hsl(30, 100%, 60%)',
+                'hsl(330, 100%, 60%)'
+            ];
+            const color = colors[Math.floor(Math.random() * colors.length)];
+            fireworks.push(new Firework(x, y, color));
+            gameState.fireCount++;
+            document.getElementById('fireCount').textContent = gameState.fireCount;
+        }
+
+        // ==================== 渲染循环 ====================
+        function animate() {
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.15)';
+            ctx.fillRect(0, 0, width, height);
+
+            fireworks = fireworks.filter(fw => {
+                fw.update();
+                fw.draw(ctx);
+                return !fw.isDead();
+            });
+
+            if (gameState.controlMode === 'gesture' && gameState.autoFire && 
+                gameState.handDetected && Date.now() - gameState.lastFireTime > 800) {
+                const x = gameState.handX * width;
+                const y = gameState.handY * height;
+                launchFirework(x, y);
+                gameState.lastFireTime = Date.now();
+            }
+
+            requestAnimationFrame(animate);
+        }
+        animate();
+
+        // ==================== 触摸控制 ====================
+        function setupTouchControls() {
+            const fireBtn = document.getElementById('fireBtn');
+            
+            // 触摸发射按钮
+            fireBtn.addEventListener('touchstart', (e) => {
+                e.preventDefault();
+                launchFirework(width * 0.5, height * 0.3);
+            });
+
+            fireBtn.addEventListener('click', (e) => {
+                launchFirework(width * 0.5, height * 0.3);
+            });
+
+            // 点击屏幕任意位置发射
+            canvas.addEventListener('touchstart', (e) => {
+                if (gameState.controlMode === 'touch') {
+                    const touch = e.touches[0];
+                    launchFirework(touch.clientX, touch.clientY);
+                }
+            }, { passive: true });
+
+            canvas.addEventListener('click', (e) => {
+                if (gameState.controlMode === 'touch') {
+                    launchFirework(e.clientX, e.clientY);
+                }
+            });
+        }
+
+        // ==================== MediaPipe Hands 设置 ====================
+        const videoElement = document.getElementById('videoElement');
+        const handCanvas = document.getElementById('handCanvas');
+        const handCtx = handCanvas.getContext('2d');
+        const handIndicator = document.getElementById('handIndicator');
+
+        function onResults(results) {
+            handCtx.save();
+            handCtx.clearRect(0, 0, handCanvas.width, handCanvas.height);
+            
+            if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+                gameState.handDetected = true;
+                document.getElementById('handStatus').classList.add('active');
+                document.getElementById('handStatus').classList.remove('inactive');
+                handIndicator.classList.add('active');
+
+                const landmarks = results.multiHandLandmarks[0];
+                
+                drawConnectors(handCtx, landmarks, HAND_CONNECTIONS,
+                    {color: '#00FF00', lineWidth: 2});
+                drawLandmarks(handCtx, landmarks,
+                    {color: '#FF0000', lineWidth: 1, radius: 3});
+
+                const wrist = landmarks[0];
+                const middleFingerBase = landmarks[9];
+                const handX = (wrist.x + middleFingerBase.x) / 2;
+                const handY = (wrist.y + middleFingerBase.y) / 2;
+
+                gameState.handX = 1 - handX;
+                gameState.handY = handY;
+
+                const indicatorX = gameState.handX * width;
+                const indicatorY = gameState.handY * height;
+                handIndicator.style.left = indicatorX + 'px';
+                handIndicator.style.top = indicatorY + 'px';
+
+                // 捏合检测
+                const thumbTip = landmarks[4];
+                const indexTip = landmarks[8];
+                const pinchDistance = Math.sqrt(
+                    Math.pow(thumbTip.x - indexTip.x, 2) +
+                    Math.pow(thumbTip.y - indexTip.y, 2)
+                );
+
+                // 张开手掌检测
+                const fingerTips = [8, 12, 16, 20];
+                const fingerBases = [5, 9, 13, 17];
+                let extendedFingers = 0;
+                
+                for (let i = 0; i < fingerTips.length; i++) {
+                    const tip = landmarks[fingerTips[i]];
+                    const base = landmarks[fingerBases[i]];
+                    const wrist = landmarks[0];
+                    
+                    const tipDist = Math.sqrt(
+                        Math.pow(tip.x - wrist.x, 2) + Math.pow(tip.y - wrist.y, 2)
+                    );
+                    const baseDist = Math.sqrt(
+                        Math.pow(base.x - wrist.x, 2) + Math.pow(base.y - wrist.y, 2)
+                    );
+                    
+                    if (tipDist > baseDist * 1.3) {
+                        extendedFingers++;
+                    }
+                }
+
+                gameState.autoFire = extendedFingers >= 4;
+
+                if (pinchDistance < 0.08 && Date.now() - gameState.lastFireTime > 500) {
+                    launchFirework(indicatorX, indicatorY);
+                    gameState.lastFireTime = Date.now();
+                    handIndicator.style.borderColor = '#ff6b6b';
+                    setTimeout(() => {
+                        handIndicator.style.borderColor = '#ffd93d';
+                    }, 200);
+                }
+
+                if (gameState.autoFire) {
+                    handIndicator.style.borderColor = '#4ade80';
+                }
+
+            } else {
+                gameState.handDetected = false;
+                document.getElementById('handStatus').classList.remove('active');
+                document.getElementById('handStatus').classList.add('inactive');
+                handIndicator.classList.remove('active');
+                gameState.autoFire = false;
+            }
+            
+            handCtx.restore();
+        }
+
+        const hands = new Hands({locateFile: (file) => {
+            return `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`;
+        }});
+
+        // 移动端优化配置
+        hands.setOptions({
+            maxNumHands: 1,
+            modelComplexity: isMobile ? 0 : 1,
+            minDetectionConfidence: 0.5,
+            minTrackingConfidence: 0.5
+        });
+
+        hands.onResults(onResults);
+
+        // ==================== 摄像头设置 ====================
+        let camera = null;
+
+        async function startCamera() {
+            document.getElementById('loading').style.display = 'block';
+            document.getElementById('loadingText').textContent = '正在启动摄像头...';
+            document.getElementById('startScreen').style.opacity = '0.5';
+
+            try {
+                // 移动端优先使用前置摄像头
+                const constraints = {
+                    video: {
+                        facingMode: isMobile ? 'user' : 'environment',
+                        width: { ideal: isMobile ? 320 : 640 },
+                        height: { ideal: isMobile ? 240 : 480 }
+                    }
+                };
+
+                // 尝试获取摄像头权限
+                const stream = await navigator.mediaDevices.getUserMedia(constraints);
+                videoElement.srcObject = stream;
+                
+                await new Promise((resolve) => {
+                    videoElement.onloadedmetadata = () => {
+                        resolve();
+                    };
+                });
+
+                await videoElement.play();
+
+                // 设置 canvas 大小
+                handCanvas.width = videoElement.videoWidth || 320;
+                handCanvas.height = videoElement.videoHeight || 240;
+
+                // 开始处理帧
+                async function processFrame() {
+                    if (gameState.isPlaying && gameState.controlMode === 'gesture') {
+                        await hands.send({image: videoElement});
+                    }
+                    requestAnimationFrame(processFrame);
+                }
+                processFrame();
+
+                document.getElementById('cameraStatus').classList.add('active');
+                document.getElementById('cameraStatus').classList.remove('inactive');
+                document.getElementById('loading').style.display = 'none';
+                document.getElementById('startScreen').style.display = 'none';
+                document.getElementById('gestureHint').style.display = 'block';
+                document.getElementById('switchModeBtn').style.display = 'block';
+                
+                gameState.isPlaying = true;
+
+            } catch (error) {
+                console.error('摄像头启动失败:', error);
+                alert('无法访问摄像头，请确保已授予摄像头权限。\n错误: ' + error.message);
+                document.getElementById('loading').style.display = 'none';
+                document.getElementById('startScreen').style.opacity = '1';
+            }
+        }
+
+        // ==================== 模式切换 ====================
+        function switchToTouchMode() {
+            gameState.controlMode = 'touch';
+            document.getElementById('modeIndicator').textContent = '触摸模式';
+            document.getElementById('cameraPreview').style.display = 'none';
+            document.getElementById('gestureHint').style.display = 'none';
+            document.getElementById('touchControls').style.display = 'block';
+            document.getElementById('switchModeBtn').textContent = '切换到手势模式';
+            document.getElementById('startScreen').style.display = 'none';
+            document.getElementById('loading').style.display = 'none';
+            gameState.isPlaying = true;
+        }
+
+        function switchToGestureMode() {
+            gameState.controlMode = 'gesture';
+            document.getElementById('modeIndicator').textContent = '手势模式';
+            document.getElementById('cameraPreview').style.display = 'block';
+            document.getElementById('gestureHint').style.display = 'block';
+            document.getElementById('touchControls').style.display = 'none';
+            document.getElementById('switchModeBtn').textContent = '切换到触摸模式';
+            startCamera();
+        }
+
+        // ==================== 事件监听 ====================
+        document.getElementById('gestureBtn').addEventListener('click', switchToGestureMode);
+        document.getElementById('touchBtn').addEventListener('click', switchToTouchMode);
+        document.getElementById('switchModeBtn').addEventListener('click', () => {
+            if (gameState.controlMode === 'touch') {
+                switchToGestureMode();
+            } else {
+                switchToTouchMode();
+            }
+        });
+
+        // 键盘快捷键（桌面端）
+        document.addEventListener('keydown', (e) => {
+            if (e.code === 'Space' && gameState.isPlaying && gameState.handDetected) {
+                e.preventDefault();
+                const x = gameState.handX * width;
+                const y = gameState.handY * height;
+                launchFirework(x, y);
+            }
+        });
+
+        // ==================== 屏幕方向检测 ====================
+        function checkOrientation() {
+            const warning = document.getElementById('orientationWarning');
+            if (window.innerWidth < window.innerHeight && isMobile) {
+                warning.classList.add('show');
+            } else {
+                warning.classList.remove('show');
+            }
+        }
+
+        window.addEventListener('orientationchange', checkOrientation);
+        window.addEventListener('resize', checkOrientation);
+        checkOrientation();
+
+        // ==================== 初始化 ====================
+        setupTouchControls();
+
+        // PWA Service Worker 注册
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.register('sw.js').catch(console.error);
+        }
+    </script>
+</body>
+</html>

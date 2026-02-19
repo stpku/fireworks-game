@@ -987,6 +987,7 @@
         // ==================== MediaPipe Hands 初始化 ====================
         let hands = null;
         let handsInitialized = false;
+        let frameCount = 0;
         
         function initHands() {
             return new Promise((resolve, reject) => {
@@ -1002,25 +1003,29 @@
                     
                     hands = new Hands({locateFile: (file) => {
                         const url = `https://unpkg.com/@mediapipe/hands/${file}`;
-                        console.log('加载模型文件:', file);
+                        console.log('加载模型文件:', file, '->', url);
                         return url;
                     }});
 
-                    // 设置结果回调
-                    hands.onResults((results) => {
-                        console.log('手势检测结果:', results.multiHandLandmarks ? '检测到手' : '未检测到手');
-                        onResults(results);
-                    });
-
-                    // 移动端优化配置
+                    // 移动端优化配置 - 必须在 onResults 之前设置
                     hands.setOptions({
                         maxNumHands: 1,
                         modelComplexity: isMobile ? 0 : 1,
-                        minDetectionConfidence: 0.7,  // 提高检测置信度
+                        minDetectionConfidence: 0.5,  // 降低阈值更容易检测
                         minTrackingConfidence: 0.5
                     });
+                    console.log('Hands 配置已设置');
 
-                    // setOptions 是同步的，直接标记初始化完成
+                    // 设置结果回调
+                    hands.onResults((results) => {
+                        frameCount++;
+                        if (frameCount % 30 === 0) { // 每30帧输出一次
+                            console.log('手势检测帧:', frameCount, '检测到:', results.multiHandLandmarks ? results.multiHandLandmarks.length + '只手' : '无');
+                        }
+                        onResults(results);
+                    });
+
+                    // 标记初始化完成
                     handsInitialized = true;
                     console.log('MediaPipe Hands 初始化成功');
                     resolve();
@@ -1035,27 +1040,41 @@
         // 等待脚本加载后初始化
         function waitForMediaPipe() {
             return new Promise((resolve) => {
-                if (typeof Hands !== 'undefined') {
-                    console.log('MediaPipe Hands 库已加载');
-                    resolve();
-                } else {
-                    console.log('等待 MediaPipe Hands 库加载...');
-                    // 轮询检查 MediaPipe 是否加载完成
-                    let attempts = 0;
-                    const maxAttempts = 100; // 10秒超时
-                    const checkInterval = setInterval(() => {
-                        attempts++;
-                        if (typeof Hands !== 'undefined') {
-                            clearInterval(checkInterval);
-                            console.log('MediaPipe Hands 库加载完成');
-                            resolve();
-                        } else if (attempts >= maxAttempts) {
-                            clearInterval(checkInterval);
-                            console.warn('MediaPipe 加载超时，请检查网络');
-                            resolve(); // 即使超时也继续，让用户可以使用触摸模式
-                        }
-                    }, 100);
+                // 检查所有需要的 MediaPipe 组件
+                const checkMediaPipe = () => {
+                    const handsLoaded = typeof Hands !== 'undefined';
+                    const drawUtilsLoaded = typeof drawConnectors !== 'undefined';
+                    const handConnectionsLoaded = typeof HAND_CONNECTIONS !== 'undefined';
+                    
+                    if (handsLoaded) {
+                        console.log('MediaPipe Hands 库已加载');
+                        if (!drawUtilsLoaded) console.warn('drawConnectors 未加载');
+                        if (!handConnectionsLoaded) console.warn('HAND_CONNECTIONS 未加载');
+                        resolve();
+                    } else {
+                        return false;
+                    }
+                    return true;
+                };
+                
+                if (checkMediaPipe()) {
+                    return;
                 }
+                
+                console.log('等待 MediaPipe Hands 库加载...');
+                // 轮询检查 MediaPipe 是否加载完成
+                let attempts = 0;
+                const maxAttempts = 100; // 10秒超时
+                const checkInterval = setInterval(() => {
+                    attempts++;
+                    if (checkMediaPipe()) {
+                        clearInterval(checkInterval);
+                    } else if (attempts >= maxAttempts) {
+                        clearInterval(checkInterval);
+                        console.warn('MediaPipe 加载超时，请检查网络');
+                        resolve(); // 即使超时也继续，让用户可以使用触摸模式
+                    }
+                }, 100);
             });
         }
 
@@ -1158,15 +1177,25 @@
                 
                 console.log('手部分析 Canvas 大小:', handCanvas.width, 'x', handCanvas.height);
 
-                // 开始处理帧 - 添加节流以避免过快处理
+                // 开始处理帧
+                let frameProcessCount = 0;
                 let lastFrameTime = 0;
-                const frameInterval = isMobile ? 200 : 100; // 移动端降低帧率
+                const frameInterval = isMobile ? 150 : 50; // 提高帧率
                 
                 async function processFrame(timestamp) {
                     if (gameState.isPlaying && gameState.controlMode === 'gesture' && hands && handsInitialized) {
                         // 节流处理
-                        if (timestamp - lastFrameTime >= frameInterval) {
+                        if (!lastFrameTime || timestamp - lastFrameTime >= frameInterval) {
                             lastFrameTime = timestamp;
+                            frameProcessCount++;
+                            
+                            // 每50帧输出一次状态
+                            if (frameProcessCount % 50 === 1) {
+                                console.log('处理帧 #' + frameProcessCount, 
+                                    '视频状态:', videoElement.readyState,
+                                    '视频尺寸:', videoElement.videoWidth + 'x' + videoElement.videoHeight);
+                            }
+                            
                             try {
                                 await hands.send({image: videoElement});
                             } catch (err) {
@@ -1176,7 +1205,17 @@
                     }
                     requestAnimationFrame(processFrame);
                 }
-                requestAnimationFrame(processFrame);
+                
+                // 确保视频已准备好再开始处理
+                if (videoElement.readyState >= 2) {
+                    console.log('视频已准备好，开始处理帧');
+                    requestAnimationFrame(processFrame);
+                } else {
+                    videoElement.onloadeddata = () => {
+                        console.log('视频数据已加载，开始处理帧');
+                        requestAnimationFrame(processFrame);
+                    };
+                }
                 
                 console.log('手势检测帧处理已启动');
 

@@ -7,7 +7,7 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="theme-color" content="#0a0a0a">
-    <title>手势控制烟火秀</title>
+    <title>手势控制烟火秀,秋实祝您新年快乐！</title>
     <link rel="manifest" href="manifest.json">
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils/control_utils.js" crossorigin="anonymous"></script>
@@ -1046,15 +1046,59 @@
         }
 
         // ==================== 事件监听 ====================
-        document.getElementById('gestureBtn').addEventListener('click', switchToGestureMode);
-        document.getElementById('touchBtn').addEventListener('click', switchToTouchMode);
-        document.getElementById('switchModeBtn').addEventListener('click', () => {
-            if (gameState.controlMode === 'touch') {
-                switchToGestureMode();
-            } else {
-                switchToTouchMode();
+        // 确保 DOM 加载完成后再绑定事件
+        document.addEventListener('DOMContentLoaded', function() {
+            const gestureBtn = document.getElementById('gestureBtn');
+            const touchBtn = document.getElementById('touchBtn');
+            const switchModeBtn = document.getElementById('switchModeBtn');
+            
+            if (gestureBtn) {
+                gestureBtn.addEventListener('click', switchToGestureMode);
             }
+            if (touchBtn) {
+                touchBtn.addEventListener('click', switchToTouchMode);
+            }
+            if (switchModeBtn) {
+                switchModeBtn.addEventListener('click', () => {
+                    if (gameState.controlMode === 'touch') {
+                        switchToGestureMode();
+                    } else {
+                        switchToTouchMode();
+                    }
+                });
+            }
+            
+            console.log('🎮 游戏初始化完成');
         });
+        
+        // 如果 DOM 已经加载完成，立即执行
+        if (document.readyState === 'complete' || document.readyState === 'interactive') {
+            setTimeout(function() {
+                const gestureBtn = document.getElementById('gestureBtn');
+                const touchBtn = document.getElementById('touchBtn');
+                const switchModeBtn = document.getElementById('switchModeBtn');
+                
+                if (gestureBtn && !gestureBtn.hasAttribute('data-bound')) {
+                    gestureBtn.setAttribute('data-bound', 'true');
+                    gestureBtn.addEventListener('click', switchToGestureMode);
+                }
+                if (touchBtn && !touchBtn.hasAttribute('data-bound')) {
+                    touchBtn.setAttribute('data-bound', 'true');
+                    touchBtn.addEventListener('click', switchToTouchMode);
+                }
+                if (switchModeBtn && !switchModeBtn.hasAttribute('data-bound')) {
+                    switchModeBtn.setAttribute('data-bound', 'true');
+                    switchModeBtn.addEventListener('click', () => {
+                        if (gameState.controlMode === 'touch') {
+                            switchToGestureMode();
+                        } else {
+                            switchToTouchMode();
+                        }
+                    });
+                }
+                console.log('🎮 游戏立即初始化完成');
+            }, 0);
+        }
 
         // 键盘快捷键（桌面端）
         document.addEventListener('keydown', (e) => {

@@ -901,10 +901,19 @@
 
                 const landmarks = results.multiHandLandmarks[0];
                 
-                drawConnectors(handCtx, landmarks, HAND_CONNECTIONS,
-                    {color: '#00FF00', lineWidth: 2});
-                drawLandmarks(handCtx, landmarks,
-                    {color: '#FF0000', lineWidth: 1, radius: 3});
+                // 绘制手部关键点（检查函数是否存在）
+                try {
+                    if (typeof drawConnectors !== 'undefined' && typeof HAND_CONNECTIONS !== 'undefined') {
+                        drawConnectors(handCtx, landmarks, HAND_CONNECTIONS,
+                            {color: '#00FF00', lineWidth: 2});
+                    }
+                    if (typeof drawLandmarks !== 'undefined') {
+                        drawLandmarks(handCtx, landmarks,
+                            {color: '#FF0000', lineWidth: 1, radius: 3});
+                    }
+                } catch (drawError) {
+                    console.warn('绘制手部关键点失败:', drawError);
+                }
 
                 const wrist = landmarks[0];
                 const middleFingerBase = landmarks[9];
@@ -989,22 +998,35 @@
                 }
                 
                 try {
+                    console.log('正在初始化 MediaPipe Hands...');
+                    
                     hands = new Hands({locateFile: (file) => {
-                        return `https://unpkg.com/@mediapipe/hands/${file}`;
+                        const url = `https://unpkg.com/@mediapipe/hands/${file}`;
+                        console.log('加载模型文件:', file);
+                        return url;
                     }});
+
+                    // 设置结果回调
+                    hands.onResults((results) => {
+                        console.log('手势检测结果:', results.multiHandLandmarks ? '检测到手' : '未检测到手');
+                        onResults(results);
+                    });
 
                     // 移动端优化配置
                     hands.setOptions({
                         maxNumHands: 1,
                         modelComplexity: isMobile ? 0 : 1,
-                        minDetectionConfidence: 0.5,
+                        minDetectionConfidence: 0.7,  // 提高检测置信度
                         minTrackingConfidence: 0.5
+                    }).then(() => {
+                        handsInitialized = true;
+                        console.log('MediaPipe Hands 初始化成功');
+                        resolve();
+                    }).catch((error) => {
+                        console.error('MediaPipe Hands 配置失败:', error);
+                        reject(error);
                     });
 
-                    hands.onResults(onResults);
-                    handsInitialized = true;
-                    console.log('✅ MediaPipe Hands 初始化成功');
-                    resolve();
                 } catch (error) {
                     console.error('MediaPipe Hands 初始化失败:', error);
                     reject(error);
@@ -1016,19 +1038,22 @@
         function waitForMediaPipe() {
             return new Promise((resolve) => {
                 if (typeof Hands !== 'undefined') {
+                    console.log('MediaPipe Hands 库已加载');
                     resolve();
                 } else {
+                    console.log('等待 MediaPipe Hands 库加载...');
                     // 轮询检查 MediaPipe 是否加载完成
                     let attempts = 0;
-                    const maxAttempts = 50; // 5秒超时
+                    const maxAttempts = 100; // 10秒超时
                     const checkInterval = setInterval(() => {
                         attempts++;
                         if (typeof Hands !== 'undefined') {
                             clearInterval(checkInterval);
+                            console.log('MediaPipe Hands 库加载完成');
                             resolve();
                         } else if (attempts >= maxAttempts) {
                             clearInterval(checkInterval);
-                            console.warn('MediaPipe 加载超时');
+                            console.warn('MediaPipe 加载超时，请检查网络');
                             resolve(); // 即使超时也继续，让用户可以使用触摸模式
                         }
                     }, 100);
@@ -1074,19 +1099,36 @@
                 });
 
                 await videoElement.play();
+                
+                console.log('摄像头已启动，分辨率:', videoElement.videoWidth, 'x', videoElement.videoHeight);
 
                 // 设置 canvas 大小
                 handCanvas.width = videoElement.videoWidth || 320;
                 handCanvas.height = videoElement.videoHeight || 240;
+                
+                console.log('手部分析 Canvas 大小:', handCanvas.width, 'x', handCanvas.height);
 
-                // 开始处理帧
-                async function processFrame() {
-                    if (gameState.isPlaying && gameState.controlMode === 'gesture' && hands) {
-                        await hands.send({image: videoElement});
+                // 开始处理帧 - 添加节流以避免过快处理
+                let lastFrameTime = 0;
+                const frameInterval = isMobile ? 200 : 100; // 移动端降低帧率
+                
+                async function processFrame(timestamp) {
+                    if (gameState.isPlaying && gameState.controlMode === 'gesture' && hands && handsInitialized) {
+                        // 节流处理
+                        if (timestamp - lastFrameTime >= frameInterval) {
+                            lastFrameTime = timestamp;
+                            try {
+                                await hands.send({image: videoElement});
+                            } catch (err) {
+                                console.error('手势检测帧处理错误:', err);
+                            }
+                        }
                     }
                     requestAnimationFrame(processFrame);
                 }
-                processFrame();
+                requestAnimationFrame(processFrame);
+                
+                console.log('手势检测帧处理已启动');
 
                 document.getElementById('cameraStatus').classList.add('active');
                 document.getElementById('cameraStatus').classList.remove('inactive');

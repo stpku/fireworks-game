@@ -1063,6 +1063,57 @@
 
         // ==================== 摄像头设置 ====================
         let camera = null;
+        let cameraStream = null;
+
+        async function requestCameraPermission() {
+            // 先检查是否支持摄像头
+            if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+                throw new Error('您的浏览器不支持摄像头功能，请使用触摸模式');
+            }
+
+            // 检查是否在微信中
+            const isWeChat = /MicroMessenger/i.test(navigator.userAgent);
+            if (isWeChat) {
+                console.log('检测到微信环境');
+            }
+
+            // 移动端优先使用前置摄像头
+            const constraints = {
+                video: {
+                    facingMode: isMobile ? 'user' : 'environment',
+                    width: { ideal: isMobile ? 320 : 640 },
+                    height: { ideal: isMobile ? 240 : 480 }
+                }
+            };
+
+            try {
+                console.log('正在请求摄像头权限...');
+                const stream = await navigator.mediaDevices.getUserMedia(constraints);
+                console.log('摄像头权限已获取');
+                return stream;
+            } catch (error) {
+                console.error('摄像头权限请求失败:', error);
+                
+                // 根据错误类型提供不同的提示
+                let errorMessage = '无法访问摄像头';
+                
+                if (error.name === 'NotAllowedError' || error.name === 'PermissionDeniedError') {
+                    errorMessage = '摄像头权限被拒绝。\n\n请在浏览器设置中允许摄像头访问，然后刷新页面重试。\n\n或者使用「触摸模式」继续游戏。';
+                } else if (error.name === 'NotFoundError' || error.name === 'DevicesNotFoundError') {
+                    errorMessage = '未检测到摄像头设备。\n\n请确保您的设备有可用的摄像头。\n\n或者使用「触摸模式」继续游戏。';
+                } else if (error.name === 'NotReadableError' || error.name === 'TrackStartError') {
+                    errorMessage = '摄像头被其他应用占用。\n\n请关闭其他使用摄像头的应用后重试。\n\n或者使用「触摸模式」继续游戏。';
+                } else if (error.name === 'NotSupportedError') {
+                    errorMessage = '您的浏览器不支持摄像头功能。\n\n请使用 Chrome、Safari 或 Edge 浏览器。\n\n或者使用「触摸模式」继续游戏。';
+                } else if (isWeChat) {
+                    errorMessage = '微信浏览器可能限制摄像头访问。\n\n建议：\n1. 点击右上角菜单，选择"在浏览器中打开"\n2. 或直接使用「触摸模式」\n\n错误详情: ' + error.message;
+                } else {
+                    errorMessage = '无法访问摄像头: ' + error.message + '\n\n请使用「触摸模式」继续游戏。';
+                }
+                
+                throw new Error(errorMessage);
+            }
+        }
 
         async function startCamera() {
             document.getElementById('loading').style.display = 'block';
@@ -1077,25 +1128,26 @@
                     await initHands();
                 }
                 
-                document.getElementById('loadingText').textContent = '正在启动摄像头...';
+                document.getElementById('loadingText').textContent = '正在请求摄像头权限...';
 
-                // 移动端优先使用前置摄像头
-                const constraints = {
-                    video: {
-                        facingMode: isMobile ? 'user' : 'environment',
-                        width: { ideal: isMobile ? 320 : 640 },
-                        height: { ideal: isMobile ? 240 : 480 }
-                    }
-                };
-
-                // 尝试获取摄像头权限
-                const stream = await navigator.mediaDevices.getUserMedia(constraints);
-                videoElement.srcObject = stream;
+                // 获取摄像头权限
+                cameraStream = await requestCameraPermission();
                 
-                await new Promise((resolve) => {
+                document.getElementById('loadingText').textContent = '正在启动摄像头...';
+                
+                videoElement.srcObject = cameraStream;
+                
+                await new Promise((resolve, reject) => {
                     videoElement.onloadedmetadata = () => {
                         resolve();
                     };
+                    videoElement.onerror = () => {
+                        reject(new Error('视频加载失败'));
+                    };
+                    // 添加超时
+                    setTimeout(() => {
+                        reject(new Error('视频加载超时'));
+                    }, 10000);
                 });
 
                 await videoElement.play();
@@ -1141,14 +1193,42 @@
 
             } catch (error) {
                 console.error('摄像头启动失败:', error);
-                alert('无法访问摄像头，请确保已授予摄像头权限。\n错误: ' + error.message);
+                
+                // 停止摄像头流
+                if (cameraStream) {
+                    cameraStream.getTracks().forEach(track => track.stop());
+                    cameraStream = null;
+                }
+                
                 document.getElementById('loading').style.display = 'none';
                 document.getElementById('startScreen').style.opacity = '1';
+                
+                // 显示友好的错误提示
+                const useTouchMode = confirm(error.message + '\n\n是否切换到触摸模式？');
+                
+                if (useTouchMode) {
+                    switchToTouchMode();
+                }
             }
+        }
+        
+        // 停止摄像头
+        function stopCamera() {
+            if (cameraStream) {
+                cameraStream.getTracks().forEach(track => track.stop());
+                cameraStream = null;
+            }
+            gameState.handDetected = false;
+            document.getElementById('handStatus').classList.remove('active');
+            document.getElementById('handStatus').classList.add('inactive');
+            document.getElementById('handIndicator').classList.remove('active');
         }
 
         // ==================== 模式切换 ====================
         function switchToTouchMode() {
+            // 停止摄像头
+            stopCamera();
+            
             gameState.controlMode = 'touch';
             document.getElementById('modeIndicator').textContent = '触摸模式';
             document.getElementById('cameraPreview').style.display = 'none';
@@ -1157,6 +1237,8 @@
             document.getElementById('switchModeBtn').textContent = '切换到手势模式';
             document.getElementById('startScreen').style.display = 'none';
             document.getElementById('loading').style.display = 'none';
+            document.getElementById('cameraStatus').classList.remove('active');
+            document.getElementById('cameraStatus').classList.add('inactive');
             gameState.isPlaying = true;
         }
 

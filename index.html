@@ -453,6 +453,30 @@
             animation: rotate 2s ease-in-out infinite;
         }
 
+        .orientation-close-btn {
+            margin-top: 30px;
+            padding: 12px 30px;
+            background: linear-gradient(45deg, #ff6b6b, #ffd93d);
+            border: none;
+            border-radius: 25px;
+            color: #fff;
+            font-size: 1rem;
+            cursor: pointer;
+            transition: transform 0.2s;
+        }
+
+        .orientation-close-btn:active {
+            transform: scale(0.95);
+        }
+
+        .skip-orientation {
+            margin-top: 15px;
+            color: rgba(255, 255, 255, 0.6);
+            font-size: 0.85rem;
+            cursor: pointer;
+            text-decoration: underline;
+        }
+
         @keyframes rotate {
             0%, 100% { transform: rotate(0deg); }
             50% { transform: rotate(90deg); }
@@ -547,6 +571,8 @@
             <div class="orientation-icon">📱</div>
             <h2>请旋转设备</h2>
             <p>为获得最佳体验，请使用横屏模式</p>
+            <button class="orientation-close-btn" id="closeOrientationBtn">继续使用竖屏</button>
+            <div class="skip-orientation" id="skipOrientation">不再提示</div>
         </div>
 
         <div id="startScreen">
@@ -949,29 +975,85 @@
             handCtx.restore();
         }
 
-        const hands = new Hands({locateFile: (file) => {
-            return `https://unpkg.com/@mediapipe/hands/${file}`;
-        }});
+        // ==================== MediaPipe Hands 初始化 ====================
+        let hands = null;
+        let handsInitialized = false;
+        
+        function initHands() {
+            return new Promise((resolve, reject) => {
+                // 检查 MediaPipe 是否已加载
+                if (typeof Hands === 'undefined') {
+                    console.error('MediaPipe Hands 未加载，请检查网络连接');
+                    reject(new Error('MediaPipe Hands 库未加载'));
+                    return;
+                }
+                
+                try {
+                    hands = new Hands({locateFile: (file) => {
+                        return `https://unpkg.com/@mediapipe/hands/${file}`;
+                    }});
 
-        // 移动端优化配置
-        hands.setOptions({
-            maxNumHands: 1,
-            modelComplexity: isMobile ? 0 : 1,
-            minDetectionConfidence: 0.5,
-            minTrackingConfidence: 0.5
-        });
+                    // 移动端优化配置
+                    hands.setOptions({
+                        maxNumHands: 1,
+                        modelComplexity: isMobile ? 0 : 1,
+                        minDetectionConfidence: 0.5,
+                        minTrackingConfidence: 0.5
+                    });
 
-        hands.onResults(onResults);
+                    hands.onResults(onResults);
+                    handsInitialized = true;
+                    console.log('✅ MediaPipe Hands 初始化成功');
+                    resolve();
+                } catch (error) {
+                    console.error('MediaPipe Hands 初始化失败:', error);
+                    reject(error);
+                }
+            });
+        }
+        
+        // 等待脚本加载后初始化
+        function waitForMediaPipe() {
+            return new Promise((resolve) => {
+                if (typeof Hands !== 'undefined') {
+                    resolve();
+                } else {
+                    // 轮询检查 MediaPipe 是否加载完成
+                    let attempts = 0;
+                    const maxAttempts = 50; // 5秒超时
+                    const checkInterval = setInterval(() => {
+                        attempts++;
+                        if (typeof Hands !== 'undefined') {
+                            clearInterval(checkInterval);
+                            resolve();
+                        } else if (attempts >= maxAttempts) {
+                            clearInterval(checkInterval);
+                            console.warn('MediaPipe 加载超时');
+                            resolve(); // 即使超时也继续，让用户可以使用触摸模式
+                        }
+                    }, 100);
+                }
+            });
+        }
 
         // ==================== 摄像头设置 ====================
         let camera = null;
 
         async function startCamera() {
             document.getElementById('loading').style.display = 'block';
-            document.getElementById('loadingText').textContent = '正在启动摄像头...';
+            document.getElementById('loadingText').textContent = '正在初始化手势识别...';
             document.getElementById('startScreen').style.opacity = '0.5';
 
             try {
+                // 等待 MediaPipe 加载并初始化
+                await waitForMediaPipe();
+                
+                if (!handsInitialized) {
+                    await initHands();
+                }
+                
+                document.getElementById('loadingText').textContent = '正在启动摄像头...';
+
                 // 移动端优先使用前置摄像头
                 const constraints = {
                     video: {
@@ -999,7 +1081,7 @@
 
                 // 开始处理帧
                 async function processFrame() {
-                    if (gameState.isPlaying && gameState.controlMode === 'gesture') {
+                    if (gameState.isPlaying && gameState.controlMode === 'gesture' && hands) {
                         await hands.send({image: videoElement});
                     }
                     requestAnimationFrame(processFrame);
@@ -1037,13 +1119,23 @@
         }
 
         function switchToGestureMode() {
+            // 检查 MediaPipe 是否可用
+            if (typeof Hands === 'undefined' && !handsInitialized) {
+                alert('手势识别库正在加载中或加载失败，请稍后重试。\n如果问题持续，请使用触摸模式。');
+                return;
+            }
+            
             gameState.controlMode = 'gesture';
             document.getElementById('modeIndicator').textContent = '手势模式';
             document.getElementById('cameraPreview').style.display = 'block';
             document.getElementById('gestureHint').style.display = 'block';
             document.getElementById('touchControls').style.display = 'none';
             document.getElementById('switchModeBtn').textContent = '切换到触摸模式';
-            startCamera();
+            startCamera().catch(error => {
+                console.error('启动手势模式失败:', error);
+                alert('启动手势模式失败: ' + error.message + '\n将自动切换到触摸模式。');
+                switchToTouchMode();
+            });
         }
 
         // ==================== 事件监听 ====================
@@ -1112,16 +1204,92 @@
         });
 
         // ==================== 屏幕方向检测 ====================
+        let orientationWarningDismissed = localStorage.getItem('orientationWarningDismissed') === 'true';
+        
         function checkOrientation() {
             const warning = document.getElementById('orientationWarning');
-            if (window.innerWidth < window.innerHeight && isMobile) {
+            
+            // 如果用户已关闭警告，不再显示
+            if (orientationWarningDismissed) {
+                warning.classList.remove('show');
+                return;
+            }
+            
+            // 使用多种方法检测屏幕方向
+            const isPortrait = window.innerWidth < window.innerHeight;
+            const isMobileDevice = isMobile;
+            
+            // 使用 matchMedia 更可靠地检测（如果支持）
+            let screenIsPortrait = isPortrait;
+            if (window.matchMedia) {
+                screenIsPortrait = window.matchMedia("(orientation: portrait)").matches;
+            }
+            
+            if (screenIsPortrait && isMobileDevice) {
                 warning.classList.add('show');
             } else {
                 warning.classList.remove('show');
             }
         }
+        
+        // 关闭横屏警告
+        function closeOrientationWarning(permanent = false) {
+            const warning = document.getElementById('orientationWarning');
+            warning.classList.remove('show');
+            if (permanent) {
+                orientationWarningDismissed = true;
+                localStorage.setItem('orientationWarningDismissed', 'true');
+            }
+        }
+        
+        // 绑定关闭按钮事件
+        document.addEventListener('DOMContentLoaded', function() {
+            const closeBtn = document.getElementById('closeOrientationBtn');
+            const skipBtn = document.getElementById('skipOrientation');
+            
+            if (closeBtn) {
+                closeBtn.addEventListener('click', function() {
+                    closeOrientationWarning(false);
+                });
+            }
+            
+            if (skipBtn) {
+                skipBtn.addEventListener('click', function() {
+                    closeOrientationWarning(true);
+                });
+            }
+            
+            checkOrientation();
+        });
+        
+        // 如果 DOM 已经加载完成，立即绑定
+        if (document.readyState === 'complete' || document.readyState === 'interactive') {
+            setTimeout(function() {
+                const closeBtn = document.getElementById('closeOrientationBtn');
+                const skipBtn = document.getElementById('skipOrientation');
+                
+                if (closeBtn && !closeBtn.hasAttribute('data-bound')) {
+                    closeBtn.setAttribute('data-bound', 'true');
+                    closeBtn.addEventListener('click', function() {
+                        closeOrientationWarning(false);
+                    });
+                }
+                
+                if (skipBtn && !skipBtn.hasAttribute('data-bound')) {
+                    skipBtn.setAttribute('data-bound', 'true');
+                    skipBtn.addEventListener('click', function() {
+                        closeOrientationWarning(true);
+                    });
+                }
+            }, 0);
+        }
 
-        window.addEventListener('orientationchange', checkOrientation);
+        window.addEventListener('orientationchange', function() {
+            // 延迟检测，等待屏幕旋转完成
+            setTimeout(checkOrientation, 100);
+            setTimeout(checkOrientation, 300);
+            setTimeout(checkOrientation, 500);
+        });
         window.addEventListener('resize', checkOrientation);
         checkOrientation();
 
